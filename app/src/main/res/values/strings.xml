@@ -1,0 +1,6 @@
+<resources>
+    <string name="app_name">CacheCleaner</string>
+    <string name="title_home">Özellikler</string>
+    <string name="title_dashboard">Önbellek Temizle</string>
+    <string name="title_notifications">Dosyalarım</string>
+</resources>
