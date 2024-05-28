@@ -1,7 +1,6 @@
 package com.barissavk.cachecleaner.ui.notifications;
 
 import android.Manifest;
-import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
@@ -21,7 +20,6 @@ import androidx.core.content.FileProvider;
 import androidx.fragment.app.Fragment;
 import androidx.recyclerview.widget.LinearLayoutManager;
 
-import com.barissavk.cachecleaner.R;
 import com.barissavk.cachecleaner.databinding.FragmentNotificationsBinding;
 
 import java.io.File;
@@ -36,6 +34,7 @@ public class NotificationsFragment extends Fragment {
     private FileAdapter adapter;
     private List<File> files = new ArrayList<>();
     private Stack<File> directoryStack = new Stack<>();
+    private File currentDirectory;
 
     public View onCreateView(@NonNull LayoutInflater inflater,
                              ViewGroup container, Bundle savedInstanceState) {
@@ -43,7 +42,7 @@ public class NotificationsFragment extends Fragment {
         View root = binding.getRoot();
 
         binding.recyclerView.setLayoutManager(new LinearLayoutManager(getContext()));
-        adapter = new FileAdapter(files, this::onFileClick, this::onFileDelete);
+        adapter = new FileAdapter(files, this::onFileClick, this::onFileDelete, this::onFileRename);
         binding.recyclerView.setAdapter(adapter);
 
         binding.buttonBack.setOnClickListener(v -> onBackPressed());
@@ -60,7 +59,7 @@ public class NotificationsFragment extends Fragment {
 
     private void onFileClick(File file) {
         if (file.isDirectory()) {
-            directoryStack.push(file.getParentFile());
+            directoryStack.push(currentDirectory);
             loadFiles(file);
         } else {
             String extension = getFileExtension(file);
@@ -73,17 +72,65 @@ public class NotificationsFragment extends Fragment {
     }
 
     private void onFileDelete(File file) {
-        if (file.delete()) {
-            files.remove(file);
-            adapter.notifyDataSetChanged();
-            Toast.makeText(getContext(), "File deleted", Toast.LENGTH_SHORT).show();
+        File currentFolder = currentDirectory;
+
+        if (file.isDirectory()) {
+            deleteFolder(file);
+            loadFiles(currentFolder);
         } else {
-            Toast.makeText(getContext(), "Failed to delete file", Toast.LENGTH_SHORT).show();
+            if (file.delete()) {
+                files.remove(file);
+                loadFiles(currentFolder);
+                Toast.makeText(getContext(), "File deleted", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(getContext(), "Failed to delete file", Toast.LENGTH_SHORT).show();
+            }
         }
+    }
+
+    private void deleteFolder(File folder) {
+        if (folder.isDirectory()) {
+            String[] children = folder.list();
+            if (children != null) {
+                for (String child : children) {
+                    File childFile = new File(folder, child);
+                    if (childFile.isDirectory()) {
+                        deleteFolder(childFile);
+                    } else {
+                        childFile.delete();
+                    }
+                }
+            }
+        }
+        folder.delete();
+    }
+
+    private void onFileRename(File file) {
+        AlertDialog.Builder builder = new AlertDialog.Builder(getContext());
+        builder.setTitle("Rename File");
+
+        final EditText input = new EditText(getContext());
+        input.setText(file.getName());
+        builder.setView(input);
+
+        builder.setPositiveButton("Rename", (dialog, which) -> {
+            String newName = input.getText().toString();
+            File newFile = new File(file.getParent(), newName);
+            if (file.renameTo(newFile)) {
+                loadFiles(currentDirectory);
+                Toast.makeText(getContext(), "File renamed", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(getContext(), "Failed to rename file", Toast.LENGTH_SHORT).show();
+            }
+        });
+        builder.setNegativeButton("Cancel", (dialog, which) -> dialog.cancel());
+
+        builder.show();
     }
 
     private void loadFiles(File directory) {
         files.clear();
+        currentDirectory = directory;
 
         if (!directory.exists()) {
             return;
@@ -95,7 +142,7 @@ public class NotificationsFragment extends Fragment {
                 files.add(file);
             }
         }
-        adapter.notifyDataSetChanged();
+        adapter.updateFiles(files); // update adapter with new file list
     }
 
     private void onBackPressed() {
@@ -105,21 +152,26 @@ public class NotificationsFragment extends Fragment {
         }
     }
 
-    @Override
-    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
-        if (requestCode == REQUEST_PERMISSION) {
-            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                loadFiles(Environment.getExternalStorageDirectory());
-            } else {
-                Toast.makeText(getContext(), "Permission denied", Toast.LENGTH_SHORT).show();
-            }
-        }
-    }
+    private void createFolder() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(getContext());
+        builder.setTitle("Create Folder");
 
-    @Override
-    public void onDestroyView() {
-        super.onDestroyView();
-        binding = null;
+        final EditText input = new EditText(getContext());
+        builder.setView(input);
+
+        builder.setPositiveButton("Create", (dialog, which) -> {
+            String folderName = input.getText().toString();
+            File newFolder = new File(currentDirectory, folderName);
+            if (newFolder.mkdir()) {
+                loadFiles(currentDirectory);
+                Toast.makeText(getContext(), "Folder created", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(getContext(), "Failed to create folder", Toast.LENGTH_SHORT).show();
+            }
+        });
+        builder.setNegativeButton("Cancel", (dialog, which) -> dialog.cancel());
+
+        builder.show();
     }
 
     private String getFileExtension(File file) {
@@ -139,36 +191,20 @@ public class NotificationsFragment extends Fragment {
         startActivity(intent);
     }
 
-    private void createFolder() {
-        View view = LayoutInflater.from(getContext()).inflate(R.layout.dialog_create_folder, null);
-        EditText editText = view.findViewById(R.id.editTextFolderName);
-
-        new AlertDialog.Builder(getContext())
-                .setTitle("Create Folder")
-                .setView(view)
-                .setPositiveButton("Create", new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface dialogInterface, int i) {
-                        String folderName = editText.getText().toString().trim();
-                        if (!folderName.isEmpty()) {
-                            File newFolder = new File(Environment.getExternalStorageDirectory(), folderName);
-                            if (newFolder.mkdirs()) {
-                                loadFiles(Environment.getExternalStorageDirectory());
-                                Toast.makeText(getContext(), "Folder created", Toast.LENGTH_SHORT).show();
-                            } else {
-                                Toast.makeText(getContext(), "Failed to create folder", Toast.LENGTH_SHORT).show();
-                            }
-                        }
-                    }
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
-    }
-
-    private void reloadFragment() {
-        if (getFragmentManager() != null) {
-            getFragmentManager().beginTransaction().detach(this).attach(this).commit();
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        if (requestCode == REQUEST_PERMISSION) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                loadFiles(Environment.getExternalStorageDirectory());
+            } else {
+                Toast.makeText(getContext(), "Permission denied", Toast.LENGTH_SHORT).show();
+            }
         }
     }
 
+    @Override
+    public void onDestroyView() {
+        super.onDestroyView();
+        binding = null;
+    }
 }
